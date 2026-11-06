@@ -69,7 +69,7 @@ SIBR_ERR << cudaGetErrorString(cudaGetLastError());
 template<int D>
 int loadPly(const char* filename,
 	std::vector<Pos>& pos,
-	std::vector<SHs<3>>& shs,
+	std::vector<float>& shs,
 	std::vector<float>& opacities,
 	std::vector<Scale>& scales,
 	std::vector<Rot>& rot,
@@ -107,8 +107,9 @@ int loadPly(const char* filename,
 	infile.read((char*)points.data(), count * sizeof(RichPoint<D>));
 
 	// Resize our SoA data
+	int SH_N = (D + 1) * (D + 1);
 	pos.resize(count);
-	shs.resize(count);
+	shs.resize(count * SH_N * 3);
 	scales.resize(count);
 	rot.resize(count);
 	opacities.resize(count);
@@ -147,7 +148,6 @@ int loadPly(const char* filename,
 	std::sort(mapp.begin(), mapp.end(), sorter);
 
 	// Move data from AoS to SoA
-	int SH_N = (D + 1) * (D + 1);
 	for (int k = 0; k < count; k++)
 	{
 		int i = mapp[k].second;
@@ -168,28 +168,34 @@ int loadPly(const char* filename,
 		// Activate alpha
 		opacities[k] = sigmoid(points[i].opacity);
 
-		shs[k].shs[0] = points[i].shs.shs[0];
-		shs[k].shs[1] = points[i].shs.shs[1];
-		shs[k].shs[2] = points[i].shs.shs[2];
+		int shBase = k * SH_N * 3;
+
+		shs[shBase + 0] = points[i].shs.shs[0];
+		shs[shBase + 1] = points[i].shs.shs[1];
+		shs[shBase + 2] = points[i].shs.shs[2];
+
 		for (int j = 1; j < SH_N; j++)
 		{
-			shs[k].shs[j * 3 + 0] = points[i].shs.shs[(j - 1) + 3];
-			shs[k].shs[j * 3 + 1] = points[i].shs.shs[(j - 1) + SH_N + 2];
-			shs[k].shs[j * 3 + 2] = points[i].shs.shs[(j - 1) + 2 * SH_N + 1];
+			shs[shBase + j * 3 + 0] = points[i].shs.shs[(j - 1) + 3];
+			shs[shBase + j * 3 + 1] = points[i].shs.shs[(j - 1) + SH_N + 2];
+			shs[shBase + j * 3 + 2] = points[i].shs.shs[(j - 1) + 2 * SH_N + 1];
 		}
 	}
 	return count;
 }
 
-void savePly(const char* filename,
+template<int D>
+void savePlyImpl(const char* filename,
 	const std::vector<Pos>& pos,
-	const std::vector<SHs<3>>& shs,
+	const std::vector<float>& shs,
 	const std::vector<float>& opacities,
 	const std::vector<Scale>& scales,
 	const std::vector<Rot>& rot,
 	const sibr::Vector3f& minn,
 	const sibr::Vector3f& maxx)
 {
+	int SH_N = (D + 1) * (D + 1);
+
 	// Read all Gaussians at once (AoS)
 	int count = 0;
 	for (int i = 0; i < pos.size(); i++)
@@ -199,7 +205,7 @@ void savePly(const char* filename,
 			continue;
 		count++;
 	}
-	std::vector<RichPoint<3>> points(count);
+	std::vector<RichPoint<D>> points(count);
 
 	// Output number of Gaussians contained
 	SIBR_LOG << "Saving " << count << " Gaussian splats" << std::endl;
@@ -213,7 +219,7 @@ void savePly(const char* filename,
 
 	for (auto s : props1)
 		outfile << "property float " << s << std::endl;
-	for (int i = 0; i < 45; i++)
+	for (int i = 0; i < 3 * (SH_N - 1); i++)
 		outfile << "property float f_rest_" << i << std::endl;
 	for (auto s : props2)
 		outfile << "property float " << s << std::endl;
@@ -232,18 +238,75 @@ void savePly(const char* filename,
 			points[count].scale.scale[j] = log(scales[i].scale[j]);
 		// Activate alpha
 		points[count].opacity = inverse_sigmoid(opacities[i]);
-		points[count].shs.shs[0] = shs[i].shs[0];
-		points[count].shs.shs[1] = shs[i].shs[1];
-		points[count].shs.shs[2] = shs[i].shs[2];
-		for (int j = 1; j < 16; j++)
+
+		// Our runtime SH storage is:
+		//   [coeff0.R, coeff0.G, coeff0.B,
+		//    coeff1.R, coeff1.G, coeff1.B, ...]
+		//
+		// RichPoint<D> stores:
+		//   DC RGB followed by channel-major rest coefficients.
+
+		int shBase = i * SH_N * 3;
+
+		// DC
+		points[count].shs.shs[0] = shs[shBase + 0];
+		points[count].shs.shs[1] = shs[shBase + 1];
+		points[count].shs.shs[2] = shs[shBase + 2];
+
+		// Rest: PLY/RichPoint storage is channel-major,
+		// while SHs<D> storage is coefficient-major/interleaved.
+		for (int j = 1; j < SH_N; ++j)
 		{
-			points[count].shs.shs[(j - 1) + 3] = shs[i].shs[j * 3 + 0];
-			points[count].shs.shs[(j - 1) + 18] = shs[i].shs[j * 3 + 1];
-			points[count].shs.shs[(j - 1) + 33] = shs[i].shs[j * 3 + 2];
+			points[count].shs.shs[j            + 2] = shs[shBase + 3 * j    ];
+			points[count].shs.shs[j +     SH_N + 1] = shs[shBase + 3 * j + 1];
+			points[count].shs.shs[j + 2 * SH_N    ] = shs[shBase + 3 * j + 2];
 		}
 		count++;
 	}
-	outfile.write((char*)points.data(), sizeof(RichPoint<3>) * points.size());
+	outfile.write((char*)points.data(), sizeof(RichPoint<D>) * points.size());
+}
+
+// Runtime-degree entry point.
+void savePly(const char* filename,
+	const std::vector<Pos>& pos,
+	const std::vector<float>& shs,
+	const std::vector<float>& opacities,
+	const std::vector<Scale>& scales,
+	const std::vector<Rot>& rot,
+	const sibr::Vector3f& minn,
+	const sibr::Vector3f& maxx,
+	int sh_degree)
+{
+	switch (sh_degree)
+	{
+	case 0:
+		savePlyImpl<0>(filename, pos, shs, opacities, scales, rot, minn, maxx);
+		break;
+
+	case 1:
+		savePlyImpl<1>(filename, pos, shs, opacities, scales, rot, minn, maxx);
+		break;
+
+	case 2:
+		savePlyImpl<2>(filename, pos, shs, opacities, scales, rot, minn, maxx);
+		break;
+
+	case 3:
+		savePlyImpl<3>(filename, pos, shs, opacities, scales, rot, minn, maxx);
+		break;
+
+	case 4:
+		savePlyImpl<4>(filename, pos, shs, opacities, scales, rot, minn, maxx);
+		break;
+
+	case 5:
+		savePlyImpl<5>(filename, pos, shs, opacities, scales, rot, minn, maxx);
+		break;
+
+	default:
+		SIBR_ERR << "Unsupported SH degree: " << sh_degree << std::endl;
+		break;
+	}
 }
 
 namespace sibr
@@ -362,7 +425,7 @@ sibr::GaussianView::GaussianView(const sibr::BasicIBRScene::Ptr & ibrScene, uint
 	std::vector<Rot> rot;
 	std::vector<Scale> scale;
 	std::vector<float> opacity;
-	std::vector<SHs<3>> shs;
+	std::vector<float> shs;
 	if (sh_degree == 0)
 	{
 		count = loadPly<0>(file, pos, shs, opacity, scale, rot, _scenemin, _scenemax);
@@ -379,6 +442,18 @@ sibr::GaussianView::GaussianView(const sibr::BasicIBRScene::Ptr & ibrScene, uint
 	{
 		count = loadPly<3>(file, pos, shs, opacity, scale, rot, _scenemin, _scenemax);
 	}
+	else if (sh_degree == 4)
+	{
+		count = loadPly<4>(file, pos, shs, opacity, scale, rot, _scenemin, _scenemax);
+	}
+	else if (sh_degree == 5)
+	{
+		count = loadPly<5>(file, pos, shs, opacity, scale, rot, _scenemin, _scenemax);
+	}
+	else if (sh_degree == 6)
+	{
+		count = loadPly<6>(file, pos, shs, opacity, scale, rot, _scenemin, _scenemax);
+	}
 
 	_boxmin = _scenemin;
 	_boxmax = _scenemax;
@@ -390,8 +465,10 @@ sibr::GaussianView::GaussianView(const sibr::BasicIBRScene::Ptr & ibrScene, uint
 	CUDA_SAFE_CALL_ALWAYS(cudaMemcpy(pos_cuda, pos.data(), sizeof(Pos) * P, cudaMemcpyHostToDevice));
 	CUDA_SAFE_CALL_ALWAYS(cudaMalloc((void**)&rot_cuda, sizeof(Rot) * P));
 	CUDA_SAFE_CALL_ALWAYS(cudaMemcpy(rot_cuda, rot.data(), sizeof(Rot) * P, cudaMemcpyHostToDevice));
-	CUDA_SAFE_CALL_ALWAYS(cudaMalloc((void**)&shs_cuda, sizeof(SHs<3>) * P));
-	CUDA_SAFE_CALL_ALWAYS(cudaMemcpy(shs_cuda, shs.data(), sizeof(SHs<3>) * P, cudaMemcpyHostToDevice));
+	// CUDA_SAFE_CALL_ALWAYS(cudaMalloc((void**)&shs_cuda, sizeof(SHs<3>) * P));
+	// CUDA_SAFE_CALL_ALWAYS(cudaMemcpy(shs_cuda, shs.data(), sizeof(SHs<3>) * P, cudaMemcpyHostToDevice));
+	CUDA_SAFE_CALL_ALWAYS(cudaMalloc((void**)&shs_cuda, sizeof(float) * shs.size()));
+	CUDA_SAFE_CALL_ALWAYS(cudaMemcpy(shs_cuda, shs.data(), sizeof(float) * shs.size(), cudaMemcpyHostToDevice));
 	CUDA_SAFE_CALL_ALWAYS(cudaMalloc((void**)&opacity_cuda, sizeof(float) * P));
 	CUDA_SAFE_CALL_ALWAYS(cudaMemcpy(opacity_cuda, opacity.data(), sizeof(float) * P, cudaMemcpyHostToDevice));
 	CUDA_SAFE_CALL_ALWAYS(cudaMalloc((void**)&scale_cuda, sizeof(Scale) * P));
@@ -407,7 +484,8 @@ sibr::GaussianView::GaussianView(const sibr::BasicIBRScene::Ptr & ibrScene, uint
 	float bg[3] = { white_bg ? 1.f : 0.f, white_bg ? 1.f : 0.f, white_bg ? 1.f : 0.f };
 	CUDA_SAFE_CALL_ALWAYS(cudaMemcpy(background_cuda, bg, 3 * sizeof(float), cudaMemcpyHostToDevice));
 
-	gData = new GaussianData(P, 
+	gData = new GaussianData(P,
+		((sh_degree + 1) * (sh_degree + 1)),
 		(float*)pos.data(),
 		(float*)rot.data(),
 		(float*)scale.data(),
@@ -498,6 +576,8 @@ void sibr::GaussianView::onRenderIBR(sibr::IRenderTarget & dst, const sibr::Came
 		}
 
 		// Rasterize
+		int SH_N = (_sh_degree + 1);
+		SH_N *= SH_N;
 		int* rects = _fastCulling ? rect_cuda : nullptr;
 		float* boxmin = _cropping ? (float*)&_boxmin : nullptr;
 		float* boxmax = _cropping ? (float*)&_boxmax : nullptr;
@@ -505,7 +585,7 @@ void sibr::GaussianView::onRenderIBR(sibr::IRenderTarget & dst, const sibr::Came
 			geomBufferFunc,
 			binningBufferFunc,
 			imgBufferFunc,
-			count, _sh_degree, 16,
+			count, _sh_degree, SH_N,
 			background_cuda,
 			_resolution.x(), _resolution.y(),
 			pos_cuda,
@@ -593,14 +673,14 @@ void sibr::GaussianView::onGUI()
 			std::vector<Pos> pos(count);
 			std::vector<Rot> rot(count);
 			std::vector<float> opacity(count);
-			std::vector<SHs<3>> shs(count);
+			std::vector<float> shs(count * (_sh_degree + 1) * (_sh_degree + 1) * 3);
 			std::vector<Scale> scale(count);
 			CUDA_SAFE_CALL_ALWAYS(cudaMemcpy(pos.data(), pos_cuda, sizeof(Pos) * count, cudaMemcpyDeviceToHost));
 			CUDA_SAFE_CALL_ALWAYS(cudaMemcpy(rot.data(), rot_cuda, sizeof(Rot) * count, cudaMemcpyDeviceToHost));
 			CUDA_SAFE_CALL_ALWAYS(cudaMemcpy(opacity.data(), opacity_cuda, sizeof(float) * count, cudaMemcpyDeviceToHost));
-			CUDA_SAFE_CALL_ALWAYS(cudaMemcpy(shs.data(), shs_cuda, sizeof(SHs<3>) * count, cudaMemcpyDeviceToHost));
+			CUDA_SAFE_CALL_ALWAYS(cudaMemcpy(shs.data(), shs_cuda, sizeof(float) * shs.size(), cudaMemcpyDeviceToHost));
 			CUDA_SAFE_CALL_ALWAYS(cudaMemcpy(scale.data(), scale_cuda, sizeof(Scale) * count, cudaMemcpyDeviceToHost));
-			savePly(_buff, pos, shs, opacity, scale, rot, _boxmin, _boxmax);
+			savePly(_buff, pos, shs, opacity, scale, rot, _boxmin, _boxmax, _sh_degree);
 		}
 	}
 

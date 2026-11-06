@@ -16,9 +16,10 @@
 
 namespace sibr { 
 
-	GaussianData::GaussianData(int num_gaussians, float* mean_data, float* rot_data, float* scale_data, float* alpha_data, float* color_data)
+	GaussianData::GaussianData(int num_gaussians, int sh_count, float* mean_data, float* rot_data, float* scale_data, float* alpha_data, float* color_data)
 	{
 		_num_gaussians = num_gaussians;
+		_sh_count = sh_count;
 		glCreateBuffers(1, &meanBuffer);
 		glCreateBuffers(1, &rotBuffer);
 		glCreateBuffers(1, &scaleBuffer);
@@ -28,7 +29,7 @@ namespace sibr {
 		glNamedBufferStorage(rotBuffer, num_gaussians * 4 * sizeof(float), rot_data, 0);
 		glNamedBufferStorage(scaleBuffer, num_gaussians * 3 * sizeof(float), scale_data, 0);
 		glNamedBufferStorage(alphaBuffer, num_gaussians * sizeof(float), alpha_data, 0);
-		glNamedBufferStorage(colorBuffer, num_gaussians * sizeof(float) * 48, color_data, 0);
+		glNamedBufferStorage(colorBuffer, num_gaussians * sizeof(float) * 3 * sh_count, color_data, 0);
 	}
 
 	void GaussianData::render(int G) const
@@ -48,6 +49,7 @@ namespace sibr {
 			sibr::loadFile(sibr::getShadersDirectory("gaussian") + "/gaussian_surface.frag"));
 
 		_paramCamPos.init(_shader, "rayOrigin");
+		_paramSHCount.init(_shader, "sh_count");
 		_paramMVP.init(_shader,"MVP");
 		_paramLimit.init(_shader, "alpha_limit");
 		_paramStage.init(_shader, "stage");
@@ -128,6 +130,7 @@ namespace sibr {
 		glEnable(GL_DEPTH_TEST);
 		glDisable(GL_BLEND);
 		_shader.begin();
+		_paramSHCount.set(mesh.shCount());
 		_paramMVP.set(eye.viewproj());
 		_paramCamPos.set(eye.position());
 		_paramLimit.set(limit);

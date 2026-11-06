@@ -29,13 +29,14 @@ namespace sibr {
 	public:
 
 		/// Constructor.
-		GaussianData(int num_gaussians, float* mean_data, float* rot_data, float* scale_data, float* alpha_data, float* color_data);
+		GaussianData(int num_gaussians, int sh_count, float* mean_data, float* rot_data, float* scale_data, float* alpha_data, float* color_data);
 
 		void render(int G) const;
-
+		int shCount() const { return _sh_count; }
+	
 	private:
-
 		int _num_gaussians;
+		int _sh_count;
 		GLuint meanBuffer;
 		GLuint rotBuffer;
 		GLuint scaleBuffer;
@@ -83,6 +84,7 @@ namespace sibr {
 		int resX, resY;
 
 		GLShader			_shader; ///< Color shader.
+		GLParameter 		_paramSHCount;
 		GLParameter			_paramMVP; ///< MVP uniform.
 		GLParameter			_paramCamPos;
 		GLParameter			_paramLimit;

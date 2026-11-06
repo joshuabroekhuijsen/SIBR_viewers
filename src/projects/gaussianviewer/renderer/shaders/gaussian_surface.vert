@@ -12,6 +12,7 @@
 
 #version 430
 
+uniform int sh_count;
 uniform mat4 MVP;
 uniform float alpha_limit;
 uniform int stage;
@@ -98,9 +99,11 @@ void main() {
     worldPos = ellipsoidRotation * (ellipsoidScale * boxVertices[vertexIndex]);
     worldPos += ellipsoidCenter;
 
-	float r = colors[boxID * 48 + 0] * 0.2 + 0.5;
-	float g = colors[boxID * 48 + 1] * 0.2 + 0.5;
-	float b = colors[boxID * 48 + 2] * 0.2 + 0.5;
+    int colorBase = boxID * sh_count * 3;
+
+    float r = colors[colorBase + 0] * 0.2 + 0.5;
+    float g = colors[colorBase + 1] * 0.2 + 0.5;
+    float b = colors[colorBase + 2] * 0.2 + 0.5;
 
 	colorVert = vec3(r, g, b);
 	
