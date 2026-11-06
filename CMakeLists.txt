@@ -8,6 +8,7 @@
 # For inquiries contact sibr@inria.fr and/or George.Drettakis@inria.fr
 
 CMAKE_MINIMUM_REQUIRED(VERSION 3.22)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
 set (CMAKE_SYSTEM_VERSION 10.0.15063.0 CACHE INTERNAL "Cmake system version" FORCE)
 PROJECT(sibr_projects)
