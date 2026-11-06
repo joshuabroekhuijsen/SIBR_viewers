@@ -398,12 +398,12 @@ sibr::GaussianView::GaussianView(const sibr::BasicIBRScene::Ptr & ibrScene, uint
 			SIBR_ERR << "Provided device index exceeds number of available CUDA devices!";
 	}
 	CUDA_SAFE_CALL_ALWAYS(cudaSetDevice(device));
-	cudaDeviceProp prop;
-	CUDA_SAFE_CALL_ALWAYS(cudaGetDeviceProperties(&prop, device));
-	if (prop.major < 7)
-	{
-		SIBR_ERR << "Sorry, need at least compute capability 7.0+!";
-	}
+	// cudaDeviceProp prop;
+	// CUDA_SAFE_CALL_ALWAYS(cudaGetDeviceProperties(&prop, device));
+	// if (prop.major < 7)
+	// {
+	// 	SIBR_ERR << "Sorry, need at least compute capability 7.0+!";
+	// }
 
 	_pointbasedrenderer.reset(new PointBasedRenderer());
 	_copyRenderer = new BufferCopyRenderer();
