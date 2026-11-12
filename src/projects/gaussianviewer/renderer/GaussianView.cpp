@@ -603,11 +603,13 @@ void sibr::GaussianView::onRenderIBR(sibr::IRenderTarget & dst, const sibr::Came
 			tan_fovy,
 			false,
 			image_cuda,
+			nullptr, // depth output float pointer
 			_antialiasing,
-			nullptr,
+			nullptr, //radii
 			rects,
 			boxmin,
-			boxmax
+			boxmax,
+			false // debug
 		);
 
 		if (!_interop_failed)
