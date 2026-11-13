@@ -212,3 +212,19 @@ ADD_SUBDIRECTORY(src)
 if (WIN32)
 ADD_SUBDIRECTORY(docs)
 endif()
+
+# Ensure the correct 64-bit GLEW runtime DLL is deployed (not on path)
+if(WIN32)
+	set(SIBR_GLEW_DLL
+		"${CMAKE_CURRENT_SOURCE_DIR}/extlibs/glew/glew-2.0.0/${LIB_BUILD_DIR}/glew32.dll"
+	)
+
+	if(NOT EXISTS "${SIBR_GLEW_DLL}")
+		message(FATAL_ERROR "GLEW DLL not found: ${SIBR_GLEW_DLL}")
+	endif()
+
+	install(
+		FILES "${SIBR_GLEW_DLL}"
+		DESTINATION bin
+	)
+endif()
